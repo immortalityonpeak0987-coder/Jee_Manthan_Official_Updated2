@@ -97,6 +97,7 @@ This repository is optimized for zero-configuration deployment on **Vercel**:
 2. Go to [vercel.com](https://vercel.com) and click **"Add New Project"**.
 3. Import your `jee-manthan-portal` repository.
 4. **Environment Variables** (Project Settings > Environment Variables):
+   - `MONGODB_URI`: Your MongoDB Atlas connection string (e.g. `mongodb+srv://<username>:<password>@cluster.mongodb.net/?retryWrites=true&w=majority`)
    - `GROQ_API_KEY`: Your API key from [Groq Console](https://console.groq.com/keys)
    - `GROQ_MODEL`: (Optional, defaults to `llama-3.3-70b-versatile`)
    - `GEMINI_API_KEY`: (Optional vision/fallback key)

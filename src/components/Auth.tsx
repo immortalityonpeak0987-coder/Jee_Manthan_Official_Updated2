@@ -2,9 +2,14 @@ import React, { useState } from "react";
 import { Card } from "./Card";
 import { Button } from "./Button";
 import { motion, AnimatePresence } from "motion/react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, X } from "lucide-react";
 
-export function Auth({ onLogin }: { onLogin: (username: string) => void }) {
+interface AuthProps {
+  onLogin: (username: string) => void;
+  onClose?: () => void;
+}
+
+export function Auth({ onLogin, onClose }: AuthProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -65,7 +70,18 @@ export function Auth({ onLogin }: { onLogin: (username: string) => void }) {
 
   return (
     <div className="flex items-center justify-center min-h-[500px]">
-      <Card className="w-full max-w-md p-8 border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl">
+      <Card className="w-full max-w-md p-8 border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl relative">
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-5 right-5 p-1.5 rounded-xl text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
+            title="Close"
+            aria-label="Close modal"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
         <h2 className="text-3xl font-bold text-gray-900 dark:text-white mb-6 text-center">
           {isLogin ? "Welcome Back" : "Create Account"}
         </h2>

@@ -118,36 +118,36 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  const handleLogout = async () => {
-    if (window.confirm("Are you sure you want to log out? Your recent data will be synced before logout.")) {
-      if (currentUser) {
-        const data: Record<string, string> = {};
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key && key.startsWith("jee_") && key !== "jee_current_user") {
-            data[key] = localStorage.getItem(key) || "";
-          }
-        }
-        try {
-          await fetch(`/api/data/sync/${currentUser}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ data })
-          });
-        } catch (err) {
-          console.error("Logout sync failed", err);
+  const handleLogout = () => {
+    const userToLogout = currentUser;
+    if (userToLogout) {
+      const data: Record<string, string> = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("jee_") && key !== "jee_current_user") {
+          data[key] = localStorage.getItem(key) || "";
         }
       }
-      localStorage.removeItem("jee_current_user");
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith("jee_")) localStorage.removeItem(key);
-      });
-      setCurrentUser(null);
-      setActiveTab("3D Overview");
+      try {
+        fetch(`/api/data/sync/${userToLogout}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data }),
+          keepalive: true
+        }).catch(err => console.error("Logout sync failed", err));
+      } catch (e) {}
     }
+    localStorage.removeItem("jee_current_user");
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith("jee_") && key !== "jee_theme") {
+        localStorage.removeItem(key);
+      }
+    });
+    setCurrentUser(null);
+    setActiveTab("3D Overview");
   };
 
-  const navItems = [
+  const allNavItems = [
     "3D Overview",
     "Home",
     "Timer",
@@ -157,6 +157,9 @@ export default function App() {
     "Feedback",
     "Owners"
   ];
+
+  // When logged out, only show "3D Overview". When logged in, show all portal options.
+  const navItems = currentUser ? allNavItems : ["3D Overview"];
 
   const handleTabChange = (tab: string) => {
     if (!currentUser && tab !== "3D Overview") {
@@ -276,24 +279,26 @@ export default function App() {
 
           {/* Theme Switcher & Auth / Account Controls */}
           <div className="shrink-0 flex items-center gap-1.5 sm:gap-2 pl-1 sm:pl-2">
-            {/* Theme Toggle Button (Light / Dark Mode for Non-3D Sections) */}
-            <button
-              onClick={toggleTheme}
-              title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-              aria-label="Toggle Light/Dark Theme"
-              className={cn(
-                "p-2 rounded-full transition-all flex items-center justify-center shrink-0 border",
-                is3DPage || theme === "dark"
-                  ? "text-amber-300 hover:text-amber-200 bg-slate-800/80 hover:bg-slate-750 border-slate-700 shadow-sm"
-                  : "text-indigo-600 hover:text-indigo-700 bg-gray-100 hover:bg-gray-200 border-gray-200 shadow-sm"
-              )}
-            >
-              {theme === "dark" ? (
-                <Sun className="w-4 h-4 transition-transform duration-300 rotate-0 hover:rotate-45" />
-              ) : (
-                <Moon className="w-4 h-4 transition-transform duration-300 -rotate-12 hover:rotate-0" />
-              )}
-            </button>
+            {/* Theme Toggle Button: only visible when user is logged in */}
+            {currentUser && (
+              <button
+                onClick={toggleTheme}
+                title={theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                aria-label="Toggle Light/Dark Theme"
+                className={cn(
+                  "p-2 rounded-full transition-all flex items-center justify-center shrink-0 border",
+                  is3DPage || theme === "dark"
+                    ? "text-amber-300 hover:text-amber-200 bg-slate-800/80 hover:bg-slate-750 border-slate-700 shadow-sm"
+                    : "text-indigo-600 hover:text-indigo-700 bg-gray-100 hover:bg-gray-200 border-gray-200 shadow-sm"
+                )}
+              >
+                {theme === "dark" ? (
+                  <Sun className="w-4 h-4 transition-transform duration-300 rotate-0 hover:rotate-45" />
+                ) : (
+                  <Moon className="w-4 h-4 transition-transform duration-300 -rotate-12 hover:rotate-0" />
+                )}
+              </button>
+            )}
 
             {currentUser ? (
               <div className={cn(
@@ -475,20 +480,16 @@ export default function App() {
                 transition={{ type: "spring", duration: 0.4 }}
                 className="relative w-full max-w-md"
               >
-                <button
-                  onClick={() => setShowAuthModal(false)}
-                  className="absolute -top-3 -right-3 z-20 w-9 h-9 rounded-full bg-slate-900 shadow-xl text-slate-300 hover:text-white flex items-center justify-center border border-slate-700 hover:bg-slate-800 transition-colors"
-                  title="Close"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-                <Auth onLogin={(user) => {
-                  setCurrentUser(user);
-                  setShowAuthModal(false);
-                  if (activeTab === "3D Overview") {
-                    setActiveTab("Home");
-                  }
-                }} />
+                <Auth
+                  onClose={() => setShowAuthModal(false)}
+                  onLogin={(user) => {
+                    setCurrentUser(user);
+                    setShowAuthModal(false);
+                    if (activeTab === "3D Overview") {
+                      setActiveTab("Home");
+                    }
+                  }}
+                />
               </motion.div>
             </div>
           )}

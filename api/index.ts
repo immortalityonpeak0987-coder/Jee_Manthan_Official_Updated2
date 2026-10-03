@@ -1,8 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 import express from "express";
-import path from "path";
-import fs from "fs";
+import { MongoClient, Db } from "mongodb";
 import { GoogleGenAI } from "@google/genai";
 
 const app = express();
@@ -10,27 +9,114 @@ const app = express();
 // Increase payload limit for base64 image uploads
 app.use(express.json({ limit: "50mb" }));
 
-const DB_FILE = process.env.VERCEL ? path.join("/tmp", "db.json") : path.join(process.cwd(), "db.json");
-let memoryDb: { users: Record<string, any> } = { users: {} };
+// MongoDB Atlas Configuration (set MONGODB_URI in Vercel or .env)
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI || "";
+const MONGODB_DB = process.env.MONGODB_DB || "jeemanthan";
 
-try {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(memoryDb));
-  } else {
-    memoryDb = JSON.parse(fs.readFileSync(DB_FILE, "utf-8"));
+let cachedClient: MongoClient | null = null;
+let cachedDb: Db | null = null;
+
+async function getDb(): Promise<Db | null> {
+  if (!MONGODB_URI) {
+    return null;
   }
-} catch (e) {
-  console.warn("Could not access or write to DB file, using in-memory fallback.", e);
+  if (cachedDb && cachedClient) {
+    return cachedDb;
+  }
+  try {
+    const client = new MongoClient(MONGODB_URI, {
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 5000,
+    });
+    await client.connect();
+    cachedClient = client;
+    cachedDb = client.db(MONGODB_DB);
+    console.log("Connected to MongoDB Atlas database:", MONGODB_DB);
+    return cachedDb;
+  } catch (err) {
+    console.error("MongoDB Atlas connection error:", err);
+    return null;
+  }
 }
 
-const saveDb = (db: any) => {
-  memoryDb = db;
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(db));
-  } catch (e) {
-    console.warn("Could not write to DB file. Changes are in-memory only.");
+// In-memory fallback if MONGODB_URI is not yet configured
+let memoryDb: { users: Record<string, any> } = { users: {} };
+
+async function findUser(username: string) {
+  const normalized = username.trim().toLowerCase();
+  const db = await getDb();
+  if (db) {
+    try {
+      const user = await db.collection("users").findOne({ usernameLower: normalized });
+      return user;
+    } catch (e) {
+      console.error("MongoDB findUser error:", e);
+    }
   }
-};
+  return memoryDb.users[normalized] || null;
+}
+
+async function createUser(username: string, password: string) {
+  const normalized = username.trim().toLowerCase();
+  const db = await getDb();
+  if (db) {
+    try {
+      const existing = await db.collection("users").findOne({ usernameLower: normalized });
+      if (existing) return { error: "Username already exists" };
+      await db.collection("users").insertOne({
+        username: username.trim(),
+        usernameLower: normalized,
+        password: password,
+        data: {},
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+      memoryDb.users[normalized] = {
+        username: username.trim(),
+        usernameLower: normalized,
+        password: password,
+        data: {}
+      };
+      return { success: true };
+    } catch (e) {
+      console.error("MongoDB createUser error:", e);
+    }
+  }
+  
+  if (memoryDb.users[normalized]) {
+    return { error: "Username already exists" };
+  }
+  memoryDb.users[normalized] = {
+    username: username.trim(),
+    usernameLower: normalized,
+    password: password,
+    data: {},
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+  return { success: true };
+}
+
+async function updateUserData(username: string, data: Record<string, any>) {
+  const normalized = username.trim().toLowerCase();
+  const db = await getDb();
+  if (db) {
+    try {
+      await db.collection("users").updateOne(
+        { usernameLower: normalized },
+        { $set: { data: data, updatedAt: new Date() } }
+      );
+    } catch (e) {
+      console.error("MongoDB updateUserData error:", e);
+    }
+  }
+  if (memoryDb.users[normalized]) {
+    memoryDb.users[normalized].data = {
+      ...memoryDb.users[normalized].data,
+      ...data
+    };
+  }
+}
 
 // Groq API Configuration from environment (set in Vercel or .env)
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -378,42 +464,69 @@ const getPrecompiledDiagram = (prompt: string): string | null => {
 // Create router for all API endpoints
 const router = express.Router();
 
-router.post("/auth/signup", (req, res) => {
-  let { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: "Missing fields" });
-  username = username.trim();
-  if (memoryDb.users[username]) return res.status(400).json({ error: "Username already exists" });
-  memoryDb.users[username] = { password, data: {} };
-  saveDb(memoryDb);
-  res.json({ success: true });
-});
-
-router.post("/auth/login", (req, res) => {
-  let { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: "Missing fields" });
-  username = username.trim();
-  const user = memoryDb.users[username];
-  if (!user || user.password !== password) return res.status(401).json({ error: "Invalid credentials" });
-  res.json({ success: true, data: user.data });
-});
-
-router.post("/data/sync/:username", (req, res) => {
-  let { username } = req.params;
-  username = username.trim();
-  const { data } = req.body;
-  if (memoryDb.users[username]) {
-    memoryDb.users[username].data = { ...memoryDb.users[username].data, ...data };
-    saveDb(memoryDb);
+router.post("/auth/signup", async (req, res) => {
+  try {
+    let { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: "Missing fields" });
+    username = username.trim();
+    if (!username || !password) return res.status(400).json({ error: "Missing fields" });
+    
+    const result = await createUser(username, password);
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Signup error:", err);
+    res.status(500).json({ error: err.message || "Failed to sign up" });
   }
-  res.json({ success: true });
 });
 
-router.get("/data/:username", (req, res) => {
-  let { username } = req.params;
-  username = username.trim();
-  const user = memoryDb.users[username];
-  if (!user) return res.status(404).json({ error: "User not found" });
-  res.json({ success: true, data: user.data || {} });
+router.post("/auth/login", async (req, res) => {
+  try {
+    let { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: "Missing fields" });
+    username = username.trim();
+    
+    const user = await findUser(username);
+    if (!user || user.password !== password) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+    res.json({ success: true, data: user.data || {} });
+  } catch (err: any) {
+    console.error("Login error:", err);
+    res.status(500).json({ error: err.message || "Failed to log in" });
+  }
+});
+
+router.post("/data/sync/:username", async (req, res) => {
+  try {
+    let { username } = req.params;
+    username = username.trim();
+    const { data } = req.body;
+    if (data && typeof data === "object") {
+      const existing = await findUser(username);
+      const merged = { ...(existing?.data || {}), ...data };
+      await updateUserData(username, merged);
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error("Sync error:", err);
+    res.status(500).json({ error: "Failed to sync data" });
+  }
+});
+
+router.get("/data/:username", async (req, res) => {
+  try {
+    let { username } = req.params;
+    username = username.trim();
+    const user = await findUser(username);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ success: true, data: user.data || {} });
+  } catch (err: any) {
+    console.error("Get data error:", err);
+    res.status(500).json({ error: "Failed to get data" });
+  }
 });
 
 router.post("/analyze-goals", async (req, res) => {
