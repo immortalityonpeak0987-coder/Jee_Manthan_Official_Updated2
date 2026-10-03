@@ -1,0 +1,6 @@
+{
+  "name": "JEE MANTHAN Portal",
+  "description": "A dedicated portal for JEE aspirants featuring daily goals, AI doubt solving, and a Telegram community.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
